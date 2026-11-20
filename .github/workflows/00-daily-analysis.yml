@@ -342,6 +342,7 @@ jobs:
           SEARXNG_BASE_URLS: ${{ vars.SEARXNG_BASE_URLS || secrets.SEARXNG_BASE_URLS }}
           SEARXNG_PUBLIC_INSTANCES_ENABLED: ${{ vars.SEARXNG_PUBLIC_INSTANCES_ENABLED || secrets.SEARXNG_PUBLIC_INSTANCES_ENABLED }}
           SEARXNG_TIMEOUT_SECONDS: ${{ vars.SEARXNG_TIMEOUT_SECONDS || secrets.SEARXNG_TIMEOUT_SECONDS }}
+          FINANCE_DIRECT_ENABLED: ${{ vars.FINANCE_DIRECT_ENABLED || secrets.FINANCE_DIRECT_ENABLED || 'true' }}
           MX_APIKEY: ${{ secrets.MX_APIKEY }}
           MX_PRIORITY: ${{ vars.MX_PRIORITY || secrets.MX_PRIORITY }}
           
@@ -529,6 +530,7 @@ jobs:
           echo "  SerpAPI Keys: $([ -n "$SERPAPI_API_KEYS" ] && echo '✅ 已配置' || echo '⚪ 未配置')"
           echo "  MiniMax API Keys: $([ -n "$MINIMAX_API_KEYS" ] && echo '✅ 已配置' || echo '⚪ 未配置')"
           echo "  Brave API Keys: $([ -n "$BRAVE_API_KEYS" ] && echo '✅ 已配置' || echo '⚪ 未配置')"
+          echo "  FinanceDirect (财经直连): $([ "${FINANCE_DIRECT_ENABLED:-true}" = "true" ] && echo '✅ 已启用' || echo '⚪ 已禁用')"
           echo "  SearXNG Base URLs: $([ -n "$SEARXNG_BASE_URLS" ] && echo '✅ 已配置' || echo '⚪ 未配置')"
           case "${SEARXNG_PUBLIC_INSTANCES_ENABLED,,}" in
             0|false|no|off)

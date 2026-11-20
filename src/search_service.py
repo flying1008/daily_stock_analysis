@@ -4884,19 +4884,34 @@ class SearchService:
                 request_days,
             )
 
-            if isinstance(provider, TavilySearchProvider) and dim.get('tavily_topic'):
-                response = provider.search(
-                    dim['query'],
-                    max_results=provider_max_results,
-                    days=request_days,
-                    topic=dim['tavily_topic'],
-                )
-            else:
-                response = provider.search(
-                    dim['query'],
-                    max_results=provider_max_results,
-                    days=request_days,
-                )
+            response = None
+            used_provider = provider
+            for offset in range(len(available_providers)):
+                cand_provider = available_providers[(provider_index - 1 + offset) % len(available_providers)]
+                if offset > 0:
+                    logger.info("[情报搜索] %s: %s 失败，尝试降级切换到 %s", dim['desc'], used_provider.name, cand_provider.name)
+                used_provider = cand_provider
+                if isinstance(cand_provider, TavilySearchProvider) and dim.get('tavily_topic'):
+                    cand_response = cand_provider.search(
+                        dim['query'],
+                        max_results=provider_max_results,
+                        days=request_days,
+                        topic=dim['tavily_topic'],
+                    )
+                else:
+                    cand_response = cand_provider.search(
+                        dim['query'],
+                        max_results=provider_max_results,
+                        days=request_days,
+                    )
+                if cand_response and cand_response.success:
+                    response = cand_response
+                    break
+                response = cand_response
+            provider = used_provider
+
+            if response is None:
+                response = SearchResponse(query=dim['query'], results=[], provider=provider.name, success=False, error_message="No provider succeeded")
             if dim['strict_freshness']:
                 filtered_response = self._filter_news_response(
                     response,

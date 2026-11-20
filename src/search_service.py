@@ -2241,6 +2241,313 @@ class SearXNGSearchProvider(BaseSearchProvider):
         )
 
 
+class FinanceDirectSearchProvider(BaseSearchProvider):
+    """
+    国内主流财经数据源直连免 Key 聚合搜索提供者
+    整合：同花顺 (10jqka)、财联社 (CLS)、东方财富 (EastMoney)、新浪财经 (Sina)、富途牛牛 (Futu)
+    特点：
+    1. 零配置、免 API Key，直接抓取国内权威财经媒体 7x24 实时快讯与个股资讯；
+    2. 针对 A 股/港美股大盘复盘与自选股分析深度优化；
+    3. 支持短期进程内缓存，避免同一分析任务内重复请求相同数据源。
+    """
+
+    def __init__(self, name: str = "FinanceDirect"):
+        super().__init__(["builtin_direct"], name)
+        self._cache_lock = threading.Lock()
+        self._cached_macro_news: List[SearchResult] = []
+        self._cached_macro_time: float = 0.0
+        self._cache_ttl: float = 120.0  # 2 分钟缓存
+
+    @property
+    def is_available(self) -> bool:
+        try:
+            import akshare as ak
+            return ak is not None
+        except Exception:
+            return False
+
+    def _fetch_macro_news(self) -> List[SearchResult]:
+        """聚合拉取主流财经快讯（财联社、同花顺、东方财富、新浪财经、富途牛牛）"""
+        with self._cache_lock:
+            now = time.time()
+            if self._cached_macro_news and (now - self._cached_macro_time < self._cache_ttl):
+                return list(self._cached_macro_news)
+
+        items: List[SearchResult] = []
+        seen_titles = set()
+        today_str = datetime.now().strftime("%Y-%m-%d")
+
+        try:
+            import akshare as ak
+        except ImportError:
+            return []
+
+        # 1. 财联社电报（专业度极高，盘面异动最快）
+        try:
+            df_cls = ak.stock_info_global_cls()
+            if df_cls is not None and not df_cls.empty:
+                for _, row in df_cls.head(30).iterrows():
+                    title = str(row.get("标题", "")).strip()
+                    content = str(row.get("内容", title)).strip()
+                    if not title and not content:
+                        continue
+                    pub_time = str(row.get("发布时间", "")).strip()
+                    pub_date = str(row.get("发布日期", today_str)).strip()
+                    pub = f"{pub_date} {pub_time}".strip()
+                    display_title = title if title else (content[:40] + ("..." if len(content) > 40 else ""))
+                    if display_title in seen_titles:
+                        continue
+                    seen_titles.add(display_title)
+                    items.append(
+                        SearchResult(
+                            title=display_title,
+                            snippet=content[:300],
+                            url="https://www.cls.cn/telegraph",
+                            source="财联社",
+                            published_date=pub,
+                            relevance_score=95,
+                            relevance_category="macro_market_news",
+                        )
+                    )
+        except Exception as e:
+            logger.debug("[FinanceDirect] 财联社快讯拉取跳过: %s", e)
+
+        # 2. 同花顺全球财经快讯
+        try:
+            df_ths = ak.stock_info_global_ths()
+            if df_ths is not None and not df_ths.empty:
+                for _, row in df_ths.head(30).iterrows():
+                    title = str(row.get("标题", "")).strip()
+                    content = str(row.get("内容", title)).strip()
+                    if not title and not content:
+                        continue
+                    if title in seen_titles:
+                        continue
+                    seen_titles.add(title)
+                    pub_time = str(row.get("发布时间", "")).strip()
+                    pub = f"{today_str} {pub_time}".strip() if len(pub_time) <= 8 else pub_time
+                    url = str(row.get("链接", "https://news.10jqka.com.cn/"))
+                    items.append(
+                        SearchResult(
+                            title=title,
+                            snippet=content[:300],
+                            url=url,
+                            source="同花顺",
+                            published_date=pub,
+                            relevance_score=90,
+                            relevance_category="macro_market_news",
+                        )
+                    )
+        except Exception as e:
+            logger.debug("[FinanceDirect] 同花顺快讯拉取跳过: %s", e)
+
+        # 3. 东方财富全球 7x24 快讯
+        try:
+            df_em = ak.stock_info_global_em()
+            if df_em is not None and not df_em.empty:
+                for _, row in df_em.head(30).iterrows():
+                    title = str(row.get("标题", "")).strip()
+                    summary = str(row.get("摘要", title)).strip()
+                    if not title and not summary:
+                        continue
+                    if title in seen_titles:
+                        continue
+                    seen_titles.add(title)
+                    pub = str(row.get("发布时间", "")).strip()
+                    url = str(row.get("链接", "http://finance.eastmoney.com/"))
+                    items.append(
+                        SearchResult(
+                            title=title,
+                            snippet=summary[:300],
+                            url=url,
+                            source="东方财富",
+                            published_date=pub,
+                            relevance_score=85,
+                            relevance_category="macro_market_news",
+                        )
+                    )
+        except Exception as e:
+            logger.debug("[FinanceDirect] 东方财富快讯拉取跳过: %s", e)
+
+        # 4. 富途牛牛全球财经快讯
+        try:
+            df_futu = ak.stock_info_global_futu()
+            if df_futu is not None and not df_futu.empty:
+                for _, row in df_futu.head(20).iterrows():
+                    title = str(row.get("标题", "")).strip()
+                    content = str(row.get("内容", title)).strip()
+                    if not title and not content:
+                        continue
+                    if title in seen_titles:
+                        continue
+                    seen_titles.add(title)
+                    pub_time = str(row.get("发布时间", "")).strip()
+                    pub = f"{today_str} {pub_time}".strip() if len(pub_time) <= 8 else pub_time
+                    url = str(row.get("链接", "https://news.futunn.com/"))
+                    items.append(
+                        SearchResult(
+                            title=title,
+                            snippet=content[:300],
+                            url=url,
+                            source="富途牛牛",
+                            published_date=pub,
+                            relevance_score=85,
+                            relevance_category="macro_market_news",
+                        )
+                    )
+        except Exception as e:
+            logger.debug("[FinanceDirect] 富途牛牛快讯拉取跳过: %s", e)
+
+        # 5. 新浪财经 7x24 直播快讯
+        try:
+            df_sina = ak.stock_info_global_sina()
+            if df_sina is not None and not df_sina.empty:
+                for _, row in df_sina.head(20).iterrows():
+                    content = str(row.get("内容", "")).strip()
+                    if not content:
+                        continue
+                    pub_time = str(row.get("时间", "")).strip()
+                    pub = f"{today_str} {pub_time}".strip() if len(pub_time) <= 8 else pub_time
+                    title = content[:40] + ("..." if len(content) > 40 else "")
+                    if title in seen_titles:
+                        continue
+                    seen_titles.add(title)
+                    items.append(
+                        SearchResult(
+                            title=title,
+                            snippet=content[:300],
+                            url="https://finance.sina.com.cn/7x24/",
+                            source="新浪财经",
+                            published_date=pub,
+                            relevance_score=80,
+                            relevance_category="macro_market_news",
+                        )
+                    )
+        except Exception as e:
+            logger.debug("[FinanceDirect] 新浪财经快讯拉取跳过: %s", e)
+
+        with self._cache_lock:
+            self._cached_macro_news = items
+            self._cached_macro_time = time.time()
+
+        return items
+
+    def _fetch_stock_news(self, symbol_or_name: str) -> List[SearchResult]:
+        """通过东方财富个股新闻接口获取目标股票资讯"""
+        items: List[SearchResult] = []
+        try:
+            import akshare as ak
+            df = ak.stock_news_em(symbol=symbol_or_name)
+            if df is not None and not df.empty:
+                for _, row in df.iterrows():
+                    title = str(row.get("新闻标题", "")).strip()
+                    content = str(row.get("新闻内容", "")).strip()
+                    if not title:
+                        continue
+                    pub = str(row.get("发布时间", "")).strip()
+                    source = str(row.get("文章来源", "东方财富")).strip()
+                    url = str(row.get("新闻链接", "")).strip()
+                    items.append(
+                        SearchResult(
+                            title=title,
+                            snippet=content[:300],
+                            url=url,
+                            source=source if source else "东方财富",
+                            published_date=pub,
+                            relevance_score=100,
+                            relevance_category="direct_company_news",
+                        )
+                    )
+        except Exception as e:
+            logger.debug("[FinanceDirect] 个股新闻 %s 拉取跳过: %s", symbol_or_name, e)
+        return items
+
+    def _do_search(
+        self,
+        query: str,
+        api_key: str,
+        max_results: int,
+        days: int = 7,
+        **kwargs: Any
+    ) -> SearchResponse:
+        query_clean = query.strip()
+        code_match = re.search(r"\b(\d{6})\b", query_clean)
+        symbol = code_match.group(1) if code_match else None
+
+        is_macro = any(
+            k in query_clean
+            for k in ["大盘", "复盘", "指数", "A股", "股市", "市场", "热点", "板块", "行情", "宏观"]
+        )
+
+        results: List[SearchResult] = []
+        if symbol:
+            stock_results = self._fetch_stock_news(symbol)
+            if stock_results:
+                results.extend(stock_results)
+
+        if not results and not is_macro:
+            words = [
+                w for w in query_clean.split()
+                if len(w) > 1 and w not in ["股票", "最新", "消息", "分析", "新闻", "走势", "行情", "公司"]
+            ]
+            if words:
+                stock_results = self._fetch_stock_news(words[0])
+                if stock_results:
+                    results.extend(stock_results)
+
+        dimension_keywords = [
+            w for w in ["减持", "增持", "违规", "处罚", "诉讼", "业绩", "财报", "分红", "研报", "评级", "订单", "重大合同", "回购"]
+            if w in query_clean
+        ]
+        if results and dimension_keywords:
+            dim_matched = []
+            dim_others = []
+            for item in results:
+                text = f"{item.title} {item.snippet}"
+                if any(dk in text for dk in dimension_keywords):
+                    dim_matched.append(item)
+                else:
+                    dim_others.append(item)
+            results = dim_matched + dim_others
+
+        if results:
+            return SearchResponse(
+                query=query,
+                results=results[:max_results],
+                provider=self._name,
+                success=True,
+            )
+
+        all_macro = self._fetch_macro_news()
+        keywords = [
+            w for w in re.split(r"[\s,，;；+]+", query_clean)
+            if len(w) > 1 and w not in ["股票", "最新", "消息", "市场", "分析"]
+        ]
+        matched: List[SearchResult] = []
+        unmatched: List[SearchResult] = []
+        for item in all_macro:
+            text = f"{item.title} {item.snippet}"
+            score = sum(1 for kw in keywords if kw in text)
+            if score > 0:
+                matched.append(item)
+            else:
+                unmatched.append(item)
+
+        results.extend(matched)
+        if len(results) < max_results:
+            results.extend(unmatched[:max_results - len(results)])
+
+        return SearchResponse(
+            query=query,
+            results=results[:max_results],
+            provider=self._name,
+            success=True,
+        )
+
+    def search(self, query: str, max_results: int = 5, days: int = 7, **kwargs: Any) -> SearchResponse:
+        return self._execute_search(query, max_results=max_results, days=days, **kwargs)
+
+
 class SearchService:
     """
     搜索服务
@@ -2412,6 +2719,7 @@ class SearchService:
         searxng_base_urls: Optional[List[str]] = None,
         searxng_public_instances_enabled: bool = False,
         searxng_timeout_seconds: Optional[int] = None,
+        finance_direct_enabled: bool = False,
         news_max_age_days: int = 3,
         news_strategy_profile: str = "short",
     ):
@@ -2440,6 +2748,7 @@ class SearchService:
             "searxng_base_urls": list(searxng_base_urls or []),
             "searxng_public_instances_enabled": bool(searxng_public_instances_enabled),
             "searxng_timeout_seconds": searxng_timeout_seconds,
+            "finance_direct_enabled": bool(finance_direct_enabled),
             "news_max_age_days": int(news_max_age_days),
             "news_strategy_profile": news_strategy_profile,
         }
@@ -2492,7 +2801,14 @@ class SearchService:
             self._providers.append(MiniMaxSearchProvider(minimax_keys))
             logger.info(f"已配置 MiniMax 搜索，共 {len(minimax_keys)} 个 API Key")
 
-        # 7. SearXNG（自建实例优先；未配置时可自动发现公共实例）
+        # 7. 财经直连搜索（同花顺、财联社、东方财富、新浪财经、富途牛牛）
+        if finance_direct_enabled:
+            finance_provider = FinanceDirectSearchProvider()
+            if finance_provider.is_available:
+                self._providers.append(finance_provider)
+                logger.info("已启用财经直连搜索聚合器（同花顺、财联社、东方财富、新浪财经、富途牛牛）")
+
+        # 8. SearXNG（自建实例优先；未配置时可自动发现公共实例）
         searxng_provider = SearXNGSearchProvider(
             searxng_base_urls,
             use_public_instances=bool(searxng_public_instances_enabled and not searxng_base_urls),
@@ -4925,6 +5241,7 @@ def get_search_service() -> SearchService:
                     searxng_base_urls=config.searxng_base_urls,
                     searxng_public_instances_enabled=config.searxng_public_instances_enabled,
                     searxng_timeout_seconds=getattr(config, "searxng_timeout_seconds", None),
+                    finance_direct_enabled=getattr(config, "finance_direct_enabled", True),
                     news_max_age_days=config.news_max_age_days,
                     news_strategy_profile=getattr(config, "news_strategy_profile", "short"),
                 )

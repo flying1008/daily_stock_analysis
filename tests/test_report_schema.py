@@ -289,6 +289,40 @@ class TestAnalyzerSchemaFallback(unittest.TestCase):
 }
 ```""")
 
+    def test_validate_json_response_accepts_json_fence_with_outside_markdown_title(self) -> None:
+        analyzer = GeminiAnalyzer.__new__(GeminiAnalyzer)
+        analyzer._config_override = SimpleNamespace(generation_backend="litellm")
+
+        analyzer._validate_json_response("""# 东方海洋（002086）决策仪表盘分析
+```json
+{
+  "stock_name": "东方海洋",
+  "sentiment_score": 65,
+  "trend_prediction": "看多",
+  "operation_advice": "持有",
+  "analysis_summary": "技术面向好"
+}
+```
+以上内容仅供参考。""")
+
+    def test_validate_json_response_rejects_json_fence_with_outside_json_object(self) -> None:
+        analyzer = GeminiAnalyzer.__new__(GeminiAnalyzer)
+        analyzer._config_override = SimpleNamespace(generation_backend="litellm")
+
+        with self.assertRaises(Exception) as context:
+            analyzer._validate_json_response("""{"sentiment_score": 70}
+```json
+{
+  "stock_name": "贵州茅台",
+  "sentiment_score": 65,
+  "trend_prediction": "看多",
+  "operation_advice": "持有",
+  "analysis_summary": "技术面向好"
+}
+```""")
+
+        self.assertEqual(getattr(context.exception, "details", {}).get("reason"), "ambiguous_json")
+
     def test_validate_json_response_rejects_ambiguous_json_before_repair(self) -> None:
         analyzer = GeminiAnalyzer.__new__(GeminiAnalyzer)
         analyzer._config_override = SimpleNamespace(generation_backend="litellm")

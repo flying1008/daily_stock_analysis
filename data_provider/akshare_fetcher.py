@@ -2091,6 +2091,36 @@ class AkshareFetcher(BaseFetcher):
                 e,
             )
 
+        # 兜底：使用轻量级盘面统计接口 (乐咕)
+        try:
+            started_at = time.monotonic()
+            logger.info(
+                "[MarketStats] component=market_stats provider=AkshareFetcher "
+                "api=ak.stock_market_activity_legu action=request_start"
+            )
+            legu_df = ak.stock_market_activity_legu()
+            elapsed = time.monotonic() - started_at
+            if legu_df is not None and not legu_df.empty:
+                item_map = dict(zip(legu_df['item'], legu_df['value']))
+                stats = {
+                    'up_count': int(float(item_map.get('上涨', 0))),
+                    'down_count': int(float(item_map.get('下跌', 0))),
+                    'flat_count': int(float(item_map.get('平盘', 0))),
+                    'limit_up_count': int(float(item_map.get('涨停', 0))),
+                    'limit_down_count': int(float(item_map.get('跌停', 0))),
+                    'total_amount': 0.0,
+                }
+                logger.info(
+                    "[MarketStats] component=market_stats provider=AkshareFetcher "
+                    "api=ak.stock_market_activity_legu action=request_complete elapsed=%.2fs up=%s down=%s",
+                    elapsed,
+                    stats['up_count'],
+                    stats['down_count'],
+                )
+                return stats
+        except Exception as legu_err:
+            logger.warning("[MarketStats] 乐咕盘面统计兜底失败: %s", legu_err)
+
         return None
 
     def _calc_market_stats(
@@ -2246,15 +2276,27 @@ class AkshareFetcher(BaseFetcher):
         """获取概念/题材涨跌榜。"""
         import akshare as ak
 
-        try:
-            self._set_random_user_agent()
-            self._enforce_rate_limit()
+        df = None
+        for attempt in range(2):
+            try:
+                self._set_random_user_agent()
+                self._enforce_rate_limit()
 
-            logger.info("[API调用] ak.stock_board_concept_name_em() 获取概念排行...")
-            df = ak.stock_board_concept_name_em()
-            if df is None or df.empty:
+                logger.info(f"[API调用] ak.stock_board_concept_name_em() 获取概念排行 (尝试 {attempt+1}/2)...")
+                df = ak.stock_board_concept_name_em()
+                if df is not None and not df.empty:
+                    break
+            except Exception as e:
+                if attempt == 0:
+                    time.sleep(1)
+                    continue
+                logger.warning(f"[Akshare] 获取概念排行失败: {e}")
                 return None
 
+        if df is None or df.empty:
+            return None
+
+        try:
             change_col = '涨跌幅'
             name_col = '板块名称'
             if change_col not in df.columns or name_col not in df.columns:
@@ -2276,7 +2318,7 @@ class AkshareFetcher(BaseFetcher):
                 ],
             )
         except Exception as e:
-            logger.warning(f"[Akshare] 获取概念排行失败: {e}")
+            logger.warning(f"[Akshare] 解析概念排行失败: {e}")
             return None
 
     def get_hot_stocks(self, n: int = 10) -> Optional[List[Dict[str, Any]]]:

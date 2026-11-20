@@ -1099,6 +1099,7 @@ class Config:
     searxng_base_urls: List[str] = field(default_factory=list)  # SearXNG instance URLs (self-hosted, no quota)
     searxng_public_instances_enabled: bool = False  # Opt in to public discovery when base URLs are absent
     searxng_timeout_seconds: int = 10  # 自建 SearXNG 单次搜索超时（秒）
+    finance_direct_enabled: bool = True  # 免 Key 直连财经快讯搜索（同花顺、财联社、东方财富、新浪财经、富途牛牛）
 
     # === Social Sentiment (US stocks only, api.adanos.org) ===
     social_sentiment_api_key: Optional[str] = None
@@ -1840,6 +1841,10 @@ class Config:
             os.getenv('SEARXNG_PUBLIC_INSTANCES_ENABLED'),
             default=False,
         )
+        finance_direct_enabled = parse_env_bool(
+            os.getenv('FINANCE_DIRECT_ENABLED'),
+            default=True,
+        )
 
         # 企微消息类型与最大字节数逻辑
         wechat_msg_type = os.getenv('WECHAT_MSG_TYPE', 'markdown')
@@ -2020,6 +2025,7 @@ class Config:
             searxng_timeout_seconds=parse_env_int(
                 os.getenv('SEARXNG_TIMEOUT_SECONDS'), 10, field_name='SEARXNG_TIMEOUT_SECONDS', minimum=1
             ),
+            finance_direct_enabled=finance_direct_enabled,
             social_sentiment_api_key=os.getenv('SOCIAL_SENTIMENT_API_KEY') or None,
             social_sentiment_api_url=os.getenv('SOCIAL_SENTIMENT_API_URL', 'https://api.adanos.org').rstrip('/'),
             news_max_age_days=parse_env_int(os.getenv('NEWS_MAX_AGE_DAYS'), 3, field_name='NEWS_MAX_AGE_DAYS', minimum=1),
@@ -3191,6 +3197,7 @@ class Config:
             or self.brave_api_keys
             or self.serpapi_keys
             or self.has_searxng_enabled()
+            or self.finance_direct_enabled
         )
 
     def is_agent_available(self) -> bool:

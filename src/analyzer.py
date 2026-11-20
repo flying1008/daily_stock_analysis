@@ -5023,13 +5023,13 @@ Generate the Decision Dashboard for **{stock_name}({code})**, output strictly in
             prompt += f"""
 ### ⚠️ Important: output the correct stock name format
 The correct stock name format is "Stock name (stock code)", e.g. "Apple (AAPL)".
-If the stock name shown above is "Stock {code}" or incorrect, **state the correct company name explicitly** at the beginning of the analysis.
+If the stock name shown above is "Stock {code}" or incorrect, **ensure the correct company name is specified in the JSON "stock_name" field**.
 """
         else:
             prompt += f"""
 ### ⚠️ 重要：输出正确的股票名称格式
 正确的股票名称格式为“股票名称（股票代码）”，例如“贵州茅台（600519）”。
-如果上方显示的股票名称为"股票{code}"或不正确，请在分析开头**明确输出该股票的正确中文全称**。
+如果上方显示的股票名称为"股票{code}"或不正确，请确保在 JSON 的 "stock_name" 字段及分析内容中**明确填入该股票的正确中文全称**。
 """
         if english and use_legacy_default_prompt:
             prompt += """
@@ -5350,12 +5350,13 @@ Output the complete Decision Dashboard in JSON format."""
             raise ValueError("ambiguous_json")
         if len(fenced_matches) == 1:
             match = fenced_matches[0]
-            outside = (text[:match.start()] + text[match.end():]).strip()
-            if outside:
-                raise ValueError("ambiguous_json")
             fence_lang = (match.group("lang") or "").strip().lower()
             if fence_lang not in {"", "json"}:
                 raise ValueError("ambiguous_json")
+            outside = (text[:match.start()] + text[match.end():]).strip()
+            if outside:
+                if fence_lang != "json" or self._contains_any_json_object(outside):
+                    raise ValueError("ambiguous_json")
             json_str = match.group("body").strip()
             data = self._load_analysis_json_candidate(json_str)
             return json_str, data
@@ -5390,6 +5391,19 @@ Output the complete Decision Dashboard in JSON format."""
         if not isinstance(data, dict):
             raise TypeError("json_root_not_object")
         return data
+
+    @staticmethod
+    def _contains_any_json_object(text: str) -> bool:
+        decoder = json.JSONDecoder()
+        for index, char in enumerate(text):
+            if char != "{":
+                continue
+            try:
+                decoder.raw_decode(text[index:])
+                return True
+            except json.JSONDecodeError:
+                continue
+        return False
 
     @staticmethod
     def _contains_embedded_json_object(text: str) -> bool:
